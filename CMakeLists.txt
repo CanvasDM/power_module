@@ -14,7 +14,11 @@ if((CONFIG_LCZ_POWER_TYPE_EXTERNAL) OR (CONFIG_LCZ_POWER_TYPE_DIRECT))
 
     # Add framework ID, msgcode and type files
     add_fwk_id_file(${CMAKE_CURRENT_SOURCE_DIR}/framework/power_ids.h)
-    add_fwk_msgcode_file(${CMAKE_CURRENT_SOURCE_DIR}/framework/power_msgcodes.h)
+    if((CONFIG_LCZ_POWER_TYPE_EXTERNAL))
+        add_fwk_msgcode_file(${CMAKE_CURRENT_SOURCE_DIR}/framework/power_msgcodes.h)
+    else()
+        add_fwk_msgcode_file(${CMAKE_CURRENT_SOURCE_DIR}/framework/power_direct_msgcodes.h)
+    endif()
     add_fwk_type_file(${CMAKE_CURRENT_SOURCE_DIR}/framework/power_types.h)
 endif()
 

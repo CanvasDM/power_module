@@ -18,6 +18,13 @@ config LCZ_POWER
 
 if LCZ_POWER
 
+config LCZ_POWER_INIT_PRIORITY
+        int "Init priority Application for power module"
+        range 0 99
+        default 0
+        help
+          Recommended to be higher than main thread init priority.
+
 choice LCZ_POWER_TYPE
 	prompt "Power monitoring type"
 	default LCZ_POWER_TYPE_EXTERNAL if BOARD_MG100 || BOARD_PINNACLE_100_DVK

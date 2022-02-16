@@ -49,60 +49,6 @@ extern "C" {
 #define GPREGRET_BOOTLOADER_VALUE    0xb1
 /* clang-format on */
 
-/******************************************************************************/
-/* Global Function Prototypes                                                 */
-/******************************************************************************/
-/**
- * @brief Init the power measuring system
- */
-void power_init(void);
-
-/**
- * @brief Enables or disables the power measurement system
- *
- * @note Will perform a reading immediately after enabled
- *
- * @param true to enable, false to disable
- */
-void power_mode_set(bool enable);
-
-/**
- * @brief Sets the power measurement interval between readings
- *
- * @note Power measuresurement will need to be stopped and started using
- *       power_mode_set() for changes to take effect
- *
- * @param Time in ms (must be >= 500)
- */
-void power_interval_set(uint32_t interval_time);
-
-/**
- * @brief Gets the power measurement interval between readings
- *
- * @return Time in ms
- */
-uint32_t power_interval_get(void);
-
-/**
- * @brief Enables or disables the power fail comparator
- *
- * @note Once the power fail warning has been sent, internal flash cannot be
- *       written to until the power fail feature is disabled
- *
- * @param true to enable, false to disable
- * @param Power level to trigger the warning on (see nrf_power.h)
- */
-void power_fail_set(bool enable, nrf_power_pof_thr_t power_level);
-
-#ifdef CONFIG_REBOOT
-/**
- * @brief Reboots the module
- *
- * @param 0 = normal reboot, 1 = stay in UART bootloader
- */
-void power_reboot_module(uint8_t type);
-#endif
-
 #ifdef __cplusplus
 }
 #endif

@@ -40,6 +40,13 @@ LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
 #include "lcz_power.h"
 
 /******************************************************************************/
+/* Global Constants, Macros and type Definitions                              */
+/******************************************************************************/
+#define POWER_QUEUE_DEPTH 16
+#define POWER_PRIORITY K_PRIO_PREEMPT(1)
+#define POWER_STACK_DEPTH 1024
+
+/******************************************************************************/
 /* Local Data Definitions                                                     */
 /******************************************************************************/
 static struct adc_channel_cfg m_1st_channel_cfg = {
@@ -52,70 +59,122 @@ static struct adc_channel_cfg m_1st_channel_cfg = {
 static int16_t m_sample_buffer;
 static struct k_timer power_timer;
 static struct k_work power_work;
-static struct k_work power_fail_work;
 static bool timer_enabled;
 static uint32_t timer_interval = DEFAULT_POWER_TIMER_PERIOD_MS;
+
+#ifdef CONFIG_LCZ_POWER_POWER_FAILURE
+static struct k_work power_fail_work;
+#endif
+
+static FwkMsgTask_t power_task;
+K_THREAD_STACK_DEFINE(power_thread_stack, POWER_STACK_DEPTH);
+K_MSGQ_DEFINE(power_queue, FWK_QUEUE_ENTRY_SIZE,
+              POWER_QUEUE_DEPTH, FWK_QUEUE_ALIGNMENT);
 
 /******************************************************************************/
 /* Local Function Prototypes                                                  */
 /******************************************************************************/
+static int power_init(const struct device *device);
 static bool power_measure_adc(const struct device *adc_dev, enum adc_gain gain,
 			      const struct adc_sequence sequence);
-static void power_run(void);
+static void power_run(FwkId_t *target);
 static void system_workq_power_timer_handler(struct k_work *item);
 static void power_timer_callback(struct k_timer *timer_id);
 
+static DispatchResult_t power_measure_now(FwkMsgReceiver_t *receiver,
+					  FwkMsg_t *msg);
+static DispatchResult_t power_mode_set(FwkMsgReceiver_t *receiver,
+				       FwkMsg_t *msg);
+static DispatchResult_t power_interval_get(FwkMsgReceiver_t *receiver,
+					   FwkMsg_t *msg);
+
 #ifdef CONFIG_LCZ_POWER_POWER_FAILURE
+static DispatchResult_t power_fail_set(FwkMsgReceiver_t *receiver,
+				       FwkMsg_t *msg);
+static DispatchResult_t power_fail_get(FwkMsgReceiver_t *receiver,
+				       FwkMsg_t *msg);
 static void system_workq_power_fail_handler(struct k_work *item);
 #endif
+
+#ifdef CONFIG_REBOOT
+static DispatchResult_t power_reboot(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
+#endif
+
+static FwkMsgHandler_t *power_dispatcher(FwkMsgCode_t msg_code);
+
+static void power_thread(void *arg1, void *arg2, void *arg3);
 
 /******************************************************************************/
 /* Global Function Definitions                                                */
 /******************************************************************************/
-void power_init(void)
-{
-	/* Setup work-queue and repetitive timer */
-	k_timer_init(&power_timer, power_timer_callback, NULL);
-	k_work_init(&power_work, system_workq_power_timer_handler);
+SYS_INIT(power_init, APPLICATION, CONFIG_LCZ_POWER_INIT_PRIORITY);
 
-#ifdef CONFIG_LCZ_POWER_POWER_FAILURE
-	k_work_init(&power_fail_work, system_workq_power_fail_handler);
-#endif
+/******************************************************************************/
+/* Local Function Definitions                                                 */
+/******************************************************************************/
+static DispatchResult_t power_measure_now(FwkMsgReceiver_t *receiver,
+					  FwkMsg_t *msg)
+{
+	power_measure_now_msg_t *fmsg = (power_measure_now_msg_t *)msg;
+
+	power_run((fmsg->target_sender == true ? &msg->header.txId : NULL));
+
+	return DISPATCH_OK;
 }
 
-void power_mode_set(bool enable)
+static DispatchResult_t power_mode_set(FwkMsgReceiver_t *receiver,
+				       FwkMsg_t *msg)
 {
-	if (enable == true && timer_enabled == false) {
+	power_mode_msg_t *fmsg = (power_mode_msg_t *)msg;
+
+	if (fmsg->interval_time >= MINIMUM_POWER_TIMER_PERIOD_MS) {
+		timer_interval = fmsg->interval_time;
+	}
+
+	if (fmsg->enabled == true && timer_enabled == false) {
 		k_timer_start(&power_timer, K_MSEC(timer_interval),
 			      K_MSEC(timer_interval));
-	} else if (enable == false && timer_enabled == true) {
+	} else if (fmsg->enabled == false && timer_enabled == true) {
 		k_timer_stop(&power_timer);
 	}
-	timer_enabled = enable;
+	timer_enabled = fmsg->enabled;
 
-	if (enable == true) {
+	if (fmsg->enabled == true) {
 		/* Take a reading right away */
-		power_run();
+		power_run(NULL);
 	}
+
+	return DISPATCH_OK;
 }
 
-void power_interval_set(uint32_t interval_time)
+static DispatchResult_t power_interval_get(FwkMsgReceiver_t *receiver,
+					   FwkMsg_t *msg)
 {
-	if (interval_time >= MINIMUM_POWER_TIMER_PERIOD_MS) {
-		timer_interval = interval_time;
-	}
-}
+	power_mode_msg_t *fmsg = (power_mode_msg_t *)BufferPool_Take(
+						sizeof(power_mode_msg_t));
 
-uint32_t power_interval_get(void)
-{
-	return timer_interval;
+	if (fmsg != NULL) {
+		fmsg->header.msgCode = FMC_POWER_MODE_GET;
+		fmsg->header.txId = FWK_ID_POWER;
+		fmsg->header.rxId = msg->header.txId;
+		fmsg->instance = 0;
+		fmsg->enabled = timer_enabled;
+		fmsg->interval_time = timer_interval;
+
+		Framework_Send(msg->header.txId, (FwkMsg_t *)fmsg);
+	}
+
+	return DISPATCH_OK;
 }
 
 #ifdef CONFIG_LCZ_POWER_POWER_FAILURE
-void power_fail_set(bool enable, nrf_power_pof_thr_t power_level)
+static DispatchResult_t power_fail_set(FwkMsgReceiver_t *receiver,
+				       FwkMsg_t *msg)
 {
-	if (enable == true) {
-		nrf_power_pofcon_set(NRF_POWER, true, power_level);
+	power_fail_mode_msg_t *fmsg = (power_fail_mode_msg_t *)msg;
+
+	if (fmsg->enabled == true) {
+		nrf_power_pofcon_set(NRF_POWER, true, fmsg->power_level);
 		nrf_power_int_enable(NRF_POWER, NRF_POWER_INT_POFWARN_MASK);
 	} else {
 		if (nrf_power_int_enable_check(NRF_POWER,
@@ -125,29 +184,84 @@ void power_fail_set(bool enable, nrf_power_pof_thr_t power_level)
 		}
 		nrf_power_pofcon_set(NRF_POWER, false, NRF_POWER_POFTHR_V28);
 	}
+
+	return DISPATCH_OK;
+}
+
+static DispatchResult_t power_fail_get(FwkMsgReceiver_t *receiver,
+				       FwkMsg_t *msg)
+{
+	power_fail_mode_msg_t *fmsg = (power_fail_mode_msg_t *)BufferPool_Take(
+						sizeof(power_fail_mode_msg_t));
+
+	if (fmsg != NULL) {
+		fmsg->header.msgCode = FMC_POWER_MODE_GET;
+		fmsg->header.txId = FWK_ID_POWER;
+		fmsg->header.rxId = msg->txId;
+		fmsg->instance = 0;
+		fmsg->power_level = nrf_power_pofcon_get(NRF_POWER,
+							 &fmsg->enabled);
+
+		Framework_Send(msg->txId, (FwkMsg_t *)fmsg);
+	}
+
+	return DISPATCH_OK;
 }
 #endif
 
 #ifdef CONFIG_REBOOT
-void power_reboot_module(uint8_t type)
+static DispatchResult_t power_reboot(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
+	power_reboot_msg_t *fmsg = (power_reboot_msg_t *)msg;
+
 	/* Log panic will cause all buffered logs to be output */
 	LOG_INF("Rebooting module%s...",
-		(type == REBOOT_TYPE_BOOTLOADER ? " into UART bootloader" :
-						  ""));
-#if CONFIG_LOG
+		(fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ?
+			" into UART bootloader" :
+			""));
+#if defined(CONFIG_LOG) && !defined(CONFIG_LOG_MODE_MINIMAL)
 	log_panic();
 #endif
 
 	/* And reboot the module */
-	sys_reboot((type == REBOOT_TYPE_BOOTLOADER ? GPREGRET_BOOTLOADER_VALUE :
-						     0));
+	sys_reboot((fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ?
+						GPREGRET_BOOTLOADER_VALUE :
+						0));
 }
 #endif
 
-/******************************************************************************/
-/* Local Function Definitions                                                 */
-/******************************************************************************/
+static FwkMsgHandler_t *power_dispatcher(FwkMsgCode_t msg_code)
+{
+	if (msg_code == FMC_POWER_MEASURE_NOW) {
+		return power_measure_now;
+	} else if (msg_code == FMC_POWER_MODE_SET) {
+		return power_mode_set;
+	} else if (msg_code == FMC_POWER_MODE_GET) {
+		return power_interval_get;
+#ifdef CONFIG_LCZ_POWER_POWER_FAILURE
+	} else if (msg_code == FMC_POWER_FAIL_SET) {
+		return power_fail_set;
+	} else if (msg_code == FMC_POWER_FAIL_GET) {
+		return power_fail_get;
+#endif
+#ifdef CONFIG_REBOOT
+	} else if (msg_code == FMC_POWER_REBOOT) {
+		return power_reboot;
+#endif
+	}
+
+	return NULL;
+}
+
+static void power_thread(void *arg1, void *arg2, void *arg3)
+{
+        FwkMsgTask_t *task = (FwkMsgTask_t *)arg1;
+
+        while (true) {
+                Framework_MsgReceiver(&task->rxer);
+        }
+}
+
 static bool power_measure_adc(const struct device *adc_dev, enum adc_gain gain,
 			      const struct adc_sequence sequence)
 {
@@ -171,7 +285,7 @@ static bool power_measure_adc(const struct device *adc_dev, enum adc_gain gain,
 	return true;
 }
 
-static void power_run(void)
+static void power_run(FwkId_t *target)
 {
 	/* Find the ADC device */
 	const struct device *adc_dev = device_get_binding(ADC0);
@@ -203,21 +317,34 @@ static void power_run(void)
 	if (fmsg != NULL) {
 		fmsg->header.msgCode = FMC_POWER_MEASURED;
 		fmsg->header.txId = FWK_ID_POWER;
-		fmsg->header.rxId = FWK_ID_RESERVED;
 		fmsg->instance = 0;
 		fmsg->configuration = LCZ_POWER_CONFIGURATION_DIRECT;
 		fmsg->gain = ADC_GAIN_1_6;
 		fmsg->voltage = (float)m_sample_buffer / ADC_LIMIT_VALUE *
 				ADC_REFERENCE_VOLTAGE * ADC_GAIN_FACTOR_SIX;
 
-		Framework_Broadcast((FwkMsg_t *)fmsg,
-				    sizeof(power_measure_msg_t));
+		if (target == NULL) {
+#ifdef CONFIG_FILTER
+			/* With filtering, send targetted message to filter */
+			fmsg->header.rxId = FWK_ID_EVENT_FILTER;
+			Framework_Send(FWK_ID_EVENT_FILTER, (FwkMsg_t *)fmsg);
+#else
+			/* Without filtering, send broadcast */
+			fmsg->header.rxId = FWK_ID_RESERVED;
+			Framework_Broadcast((FwkMsg_t *)fmsg,
+					    sizeof(power_measure_msg_t));
+#endif
+		} else {
+			/* Targetted message, send only to target */
+			fmsg->header.rxId = *target;
+			Framework_Send(*target, (FwkMsg_t *)fmsg);
+		}
 	}
 }
 
 static void system_workq_power_timer_handler(struct k_work *item)
 {
-	power_run();
+	power_run(NULL);
 }
 
 #ifdef CONFIG_LCZ_POWER_POWER_FAILURE
@@ -255,3 +382,40 @@ void nrfx_power_clock_irq_handler(void)
 	}
 }
 #endif
+
+/******************************************************************************/
+/* SYS INIT                                                                   */
+/******************************************************************************/
+static int power_init(const struct device *device)
+{
+	ARG_UNUSED(device);
+
+	/* Setup work-queue and repetitive timer */
+	k_timer_init(&power_timer, power_timer_callback, NULL);
+	k_work_init(&power_work, system_workq_power_timer_handler);
+
+#ifdef CONFIG_LCZ_POWER_POWER_FAILURE
+	k_work_init(&power_fail_work, system_workq_power_fail_handler);
+#endif
+
+	/* Create thread for framework message processing */
+	power_task.rxer.id = FWK_ID_POWER;
+	power_task.rxer.rxBlockTicks = K_FOREVER;
+	power_task.rxer.pMsgDispatcher = power_dispatcher;
+	power_task.timerDurationTicks = K_MSEC(0);
+	power_task.timerPeriodTicks = K_MSEC(0);
+	power_task.rxer.pQueue = &power_queue;
+
+	Framework_RegisterTask(&power_task);
+
+	power_task.pTid =
+		k_thread_create(&power_task.threadData,
+				power_thread_stack,
+				K_THREAD_STACK_SIZEOF(power_thread_stack),
+				power_thread, &power_task, NULL, NULL,
+				POWER_PRIORITY, 0, K_NO_WAIT);
+
+	k_thread_name_set(power_task.pTid, "power");
+
+	return 0;
+}
