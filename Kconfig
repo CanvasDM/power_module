@@ -44,10 +44,10 @@ config LCZ_POWER_TYPE_EXTERNAL
 
 endchoice
 
-config LCZ_POWER_LOG_LEVEL
-	int "Log level for power module"
-	range 0 4
-	default 3
+# Include logging configuration
+module = LCZ_POWER
+module-str = LCZ_POWER
+source "subsys/logging/Kconfig.template.log_config"
 
 config LCZ_CUSTOM_FATAL_ERROR_HANDLER
 	bool "Custom fatal error handler that resets on fatal error"
