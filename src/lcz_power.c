@@ -38,9 +38,7 @@ LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
 /******************************************************************************/
 /* Local Constant, Macro and Type Definitions                                 */
 /******************************************************************************/
-#define LCZ_POWER_QUEUE_DEPTH 16
 #define LCZ_POWER_PRIORITY K_PRIO_PREEMPT(1)
-#define LCZ_POWER_STACK_DEPTH 1024
 
 /* clang-format off */
 /* Port and pin number of the voltage measurement enabling functionality */
@@ -86,9 +84,10 @@ static bool timer_enabled;
 static uint32_t timer_interval = DEFAULT_LCZ_POWER_TIMER_PERIOD_MS;
 
 static FwkMsgTask_t lcz_power_task;
-K_THREAD_STACK_DEFINE(lcz_power_thread_stack, LCZ_POWER_STACK_DEPTH);
+K_THREAD_STACK_DEFINE(lcz_power_thread_stack,
+		      CONFIG_LCZ_POWER_THREAD_STACK_SIZE);
 K_MSGQ_DEFINE(lcz_power_queue, FWK_QUEUE_ENTRY_SIZE,
-	      LCZ_POWER_QUEUE_DEPTH, FWK_QUEUE_ALIGNMENT);
+	      CONFIG_LCZ_POWER_THREAD_QUEUE_DEPTH, FWK_QUEUE_ALIGNMENT);
 
 /******************************************************************************/
 /* Local Function Prototypes                                                  */
