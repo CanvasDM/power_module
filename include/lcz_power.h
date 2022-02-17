@@ -24,8 +24,8 @@ extern "C" {
 /******************************************************************************/
 
 /* Default and minimum measurement times between readings */
-#define DEFAULT_POWER_TIMER_PERIOD_MS (CONFIG_LCZ_ADC_SAMPLE_PERIOD * 1000)
-#define MINIMUM_POWER_TIMER_PERIOD_MS 500
+#define DEFAULT_LCZ_POWER_TIMER_PERIOD_MS (CONFIG_LCZ_ADC_SAMPLE_PERIOD * 1000)
+#define MINIMUM_LCZ_POWER_TIMER_PERIOD_MS 500
 
 /* Reboot types */
 #define REBOOT_TYPE_NORMAL 0
