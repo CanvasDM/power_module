@@ -14,6 +14,7 @@ config LCZ_POWER
 	select REBOOT
 	select FRAMEWORK
 	select FWK_AUTO_GENERATE_FILES
+	select FWK_SENSOR
 	select LOCKING
 
 if LCZ_POWER

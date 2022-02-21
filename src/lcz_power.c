@@ -167,7 +167,7 @@ static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver,
 						sizeof(lcz_power_mode_msg_t));
 
 	if (fmsg != NULL) {
-		fmsg->header.msgCode = FMC_LCZ_POWER_MODE_GET;
+		fmsg->header.msgCode = FMC_LCZ_SENSOR_CONFIG_GET;
 		fmsg->header.txId = FWK_ID_LCZ_POWER;
 		fmsg->header.rxId = msg->header.txId;
 		fmsg->instance = 0;
@@ -204,11 +204,11 @@ static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver,
 
 static FwkMsgHandler_t *lcz_power_dispatcher(FwkMsgCode_t msg_code)
 {
-	if (msg_code == FMC_LCZ_POWER_MEASURE_NOW) {
+	if (msg_code == FMC_LCZ_SENSOR_MEASURE_NOW) {
 		return lcz_power_measure_now;
-	} else if (msg_code == FMC_LCZ_POWER_MODE_SET) {
+	} else if (msg_code == FMC_LCZ_SENSOR_CONFIG_SET) {
 		return lcz_power_mode_set;
-	} else if (msg_code == FMC_LCZ_POWER_MODE_GET) {
+	} else if (msg_code == FMC_LCZ_SENSOR_CONFIG_GET) {
 		return lcz_power_interval_get;
 #ifdef CONFIG_REBOOT
 	} else if (msg_code == FMC_LCZ_POWER_REBOOT) {
@@ -332,7 +332,7 @@ static void lcz_power_run(FwkId_t *target)
 					sizeof(lcz_power_measure_msg_t));
 
 	if (fmsg != NULL) {
-		fmsg->header.msgCode = FMC_LCZ_POWER_MEASURED;
+		fmsg->header.msgCode = FMC_LCZ_SENSOR_MEASURED;
 		fmsg->header.txId = FWK_ID_LCZ_POWER;
 		fmsg->instance = 0;
 		fmsg->configuration = LCZ_POWER_CONFIGURATION_POTENTIAL_DIVIDER;

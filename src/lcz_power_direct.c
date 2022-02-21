@@ -156,7 +156,7 @@ static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver,
 						sizeof(lcz_power_mode_msg_t));
 
 	if (fmsg != NULL) {
-		fmsg->header.msgCode = FMC_LCZ_POWER_MODE_GET;
+		fmsg->header.msgCode = FMC_LCZ_SENSOR_CONFIG_GET;
 		fmsg->header.txId = FWK_ID_LCZ_POWER;
 		fmsg->header.rxId = msg->header.txId;
 		fmsg->instance = 0;
@@ -198,7 +198,7 @@ static DispatchResult_t lcz_power_fail_get(FwkMsgReceiver_t *receiver,
 					sizeof(lcz_power_fail_mode_msg_t));
 
 	if (fmsg != NULL) {
-		fmsg->header.msgCode = FMC_LCZ_POWER_MODE_GET;
+		fmsg->header.msgCode = FMC_LCZ_SENSOR_TRIGGER_GET;
 		fmsg->header.txId = FWK_ID_LCZ_POWER;
 		fmsg->header.rxId = msg->header.txId;
 		fmsg->instance = 0;
@@ -236,16 +236,16 @@ static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver,
 
 static FwkMsgHandler_t *lcz_power_dispatcher(FwkMsgCode_t msg_code)
 {
-	if (msg_code == FMC_LCZ_POWER_MEASURE_NOW) {
+	if (msg_code == FMC_LCZ_SENSOR_MEASURE_NOW) {
 		return lcz_power_measure_now;
-	} else if (msg_code == FMC_LCZ_POWER_MODE_SET) {
+	} else if (msg_code == FMC_LCZ_SENSOR_CONFIG_SET) {
 		return lcz_power_mode_set;
-	} else if (msg_code == FMC_LCZ_POWER_MODE_GET) {
+	} else if (msg_code == FMC_LCZ_SENSOR_CONFIG_GET) {
 		return lcz_power_interval_get;
 #ifdef CONFIG_LCZ_POWER_POWER_FAILURE
-	} else if (msg_code == FMC_LCZ_POWER_FAIL_SET) {
+	} else if (msg_code == FMC_LCZ_SENSOR_TRIGGER_SET) {
 		return lcz_power_fail_set;
-	} else if (msg_code == FMC_LCZ_POWER_FAIL_GET) {
+	} else if (msg_code == FMC_LCZ_SENSOR_TRIGGER_GET) {
 		return lcz_power_fail_get;
 #endif
 #ifdef CONFIG_REBOOT
@@ -321,7 +321,7 @@ static void lcz_power_run(FwkId_t *target)
 					sizeof(lcz_power_measure_msg_t));
 
 	if (fmsg != NULL) {
-		fmsg->header.msgCode = FMC_LCZ_POWER_MEASURED;
+		fmsg->header.msgCode = FMC_LCZ_SENSOR_MEASURED;
 		fmsg->header.txId = FWK_ID_LCZ_POWER;
 		fmsg->instance = 0;
 		fmsg->configuration = LCZ_POWER_CONFIGURATION_DIRECT;
@@ -329,22 +329,8 @@ static void lcz_power_run(FwkId_t *target)
 		fmsg->voltage = (float)m_sample_buffer / ADC_LIMIT_VALUE *
 				ADC_REFERENCE_VOLTAGE * ADC_GAIN_FACTOR_SIX;
 
-		if (target == NULL) {
-#ifdef CONFIG_FILTER
-			/* With filtering, send targetted message to filter */
-			fmsg->header.rxId = FWK_ID_EVENT_FILTER;
-			Framework_Send(FWK_ID_EVENT_FILTER, (FwkMsg_t *)fmsg);
-#else
-			/* Without filtering, send broadcast */
-			fmsg->header.rxId = FWK_ID_RESERVED;
-			Framework_Broadcast((FwkMsg_t *)fmsg,
-					    sizeof(lcz_power_measure_msg_t));
-#endif
-		} else {
-			/* Targetted message, send only to target */
-			fmsg->header.rxId = *target;
-			Framework_Send(*target, (FwkMsg_t *)fmsg);
-		}
+		FwkMsg_FilteredTargettedSend((FwkMsg_t *)fmsg, target,
+					     sizeof(lcz_power_measure_msg_t));
 	}
 }
 
@@ -356,8 +342,14 @@ static void system_workq_lcz_power_timer_handler(struct k_work *item)
 #ifdef CONFIG_LCZ_POWER_POWER_FAILURE
 static void system_workq_lcz_power_fail_handler(struct k_work *item)
 {
-	FRAMEWORK_MSG_CREATE_AND_BROADCAST(FWK_ID_LCZ_POWER,
-					   FMC_LCZ_POWER_FAIL_TRIGGERED);
+	FwkMsg_t *fmsg = (FwkMsg_t *)BufferPool_Take(sizeof(FwkMsg_t));
+
+	if (fmsg != NULL) {
+		fmsg->header.msgCode = FMC_LCZ_SENSOR_TRIGGERED;
+		fmsg->header.txId = FWK_ID_LCZ_POWER;
+
+		FwkMsg_FilteredTargettedSend(fmsg, NULL, sizeof(FwkMsg_t));
+	}
 }
 #endif
 
