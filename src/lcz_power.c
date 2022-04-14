@@ -324,7 +324,6 @@ static void lcz_power_run(FwkId_t *target)
 		LOG_ERR("Error setting power GPIO");
 	}
 
-
 	locking_give(LOCKING_ID_adc);
 
 	lcz_power_measure_msg_t *fmsg =
@@ -346,7 +345,9 @@ static void lcz_power_run(FwkId_t *target)
 		}
 
 		fmsg->voltage = (float)m_sample_buffer / ADC_LIMIT_VALUE *
-				ADC_REFERENCE_VOLTAGE * scaling;
+				ADC_REFERENCE_VOLTAGE *
+				ADC_VOLTAGE_TOP_RESISTOR /
+				ADC_VOLTAGE_BOTTOM_RESISTOR * scaling;
 
 		if (target == NULL) {
 #ifdef CONFIG_FILTER
