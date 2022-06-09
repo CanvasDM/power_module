@@ -10,9 +10,9 @@
 #include <logging/log.h>
 LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
 
-/******************************************************************************/
-/* Includes                                                                   */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Includes                                                                                       */
+/**************************************************************************************************/
 #include <stdio.h>
 #include <zephyr/types.h>
 #include <kernel.h>
@@ -33,26 +33,20 @@ LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
 #include <sys/reboot.h>
 #endif
 
-#if defined(CONFIG_LCZ_POWER_POWER_FAILURE) && defined(CONFIG_MPSL)
-#include <mpsl.h>
-#endif
-
 #include "lcz_power.h"
 
-/******************************************************************************/
-/* Global Constants, Macros and type Definitions                              */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Global Constants, Macros and type Definitions                                                  */
+/**************************************************************************************************/
 #define LCZ_POWER_PRIORITY K_PRIO_PREEMPT(1)
 
-/******************************************************************************/
-/* Local Data Definitions                                                     */
-/******************************************************************************/
-static struct adc_channel_cfg m_1st_channel_cfg = {
-	.reference = ADC_REF_INTERNAL,
-	.acquisition_time = ADC_ACQUISITION_TIME,
-	.channel_id = ADC_CHANNEL_ID,
-	.input_positive = NRF_SAADC_INPUT_VDD
-};
+/**************************************************************************************************/
+/* Local Data Definitions                                                                         */
+/**************************************************************************************************/
+static struct adc_channel_cfg m_1st_channel_cfg = { .reference = ADC_REF_INTERNAL,
+						    .acquisition_time = ADC_ACQUISITION_TIME,
+						    .channel_id = ADC_CHANNEL_ID,
+						    .input_positive = NRF_SAADC_INPUT_VDD };
 
 static int16_t m_sample_buffer;
 static struct k_timer lcz_power_timer;
@@ -65,56 +59,49 @@ static struct k_work lcz_power_fail_work;
 #endif
 
 static FwkMsgTask_t lcz_power_task;
-K_THREAD_STACK_DEFINE(lcz_power_thread_stack,
-		      CONFIG_LCZ_POWER_THREAD_STACK_SIZE);
-K_MSGQ_DEFINE(lcz_power_queue, FWK_QUEUE_ENTRY_SIZE,
-              CONFIG_LCZ_POWER_THREAD_QUEUE_DEPTH, FWK_QUEUE_ALIGNMENT);
+K_THREAD_STACK_DEFINE(lcz_power_thread_stack, CONFIG_LCZ_POWER_THREAD_STACK_SIZE);
+K_MSGQ_DEFINE(lcz_power_queue, FWK_QUEUE_ENTRY_SIZE, CONFIG_LCZ_POWER_THREAD_QUEUE_DEPTH,
+	      FWK_QUEUE_ALIGNMENT);
 
-/******************************************************************************/
-/* Local Function Prototypes                                                  */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Local Function Prototypes                                                                      */
+/**************************************************************************************************/
 static int lcz_power_init(const struct device *device);
-static bool lcz_power_measure_adc(const struct device *adc_dev,
-				  enum adc_gain gain,
+static bool lcz_power_measure_adc(const struct device *adc_dev, enum adc_gain gain,
 				  const struct adc_sequence sequence);
 static void lcz_power_run(FwkId_t *target);
 static void system_workq_lcz_power_timer_handler(struct k_work *item);
 static void lcz_power_timer_callback(struct k_timer *timer_id);
 
-static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver,
-					  FwkMsg_t *msg);
-static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver,
-				       FwkMsg_t *msg);
-static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver,
-					   FwkMsg_t *msg);
+static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
+static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
+static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
 
 #ifdef CONFIG_LCZ_POWER_POWER_FAILURE
-static DispatchResult_t lcz_power_fail_set(FwkMsgReceiver_t *receiver,
-				       FwkMsg_t *msg);
-static DispatchResult_t lcz_power_fail_get(FwkMsgReceiver_t *receiver,
-				       FwkMsg_t *msg);
+static DispatchResult_t lcz_power_fail_set(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
+static DispatchResult_t lcz_power_fail_get(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
 static void system_workq_lcz_power_fail_handler(struct k_work *item);
 #endif
 
 #ifdef CONFIG_REBOOT
-static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver,
-					 FwkMsg_t *msg);
+static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
 #endif
 
 static FwkMsgHandler_t *lcz_power_dispatcher(FwkMsgCode_t msg_code);
 
 static void lcz_power_thread(void *arg1, void *arg2, void *arg3);
 
-/******************************************************************************/
-/* Global Function Definitions                                                */
-/******************************************************************************/
+static void power_failure_handler(void);
+
+/**************************************************************************************************/
+/* Global Function Definitions                                                                    */
+/**************************************************************************************************/
 SYS_INIT(lcz_power_init, APPLICATION, CONFIG_LCZ_POWER_INIT_PRIORITY);
 
-/******************************************************************************/
-/* Local Function Definitions                                                 */
-/******************************************************************************/
-static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver,
-					  FwkMsg_t *msg)
+/**************************************************************************************************/
+/* Local Function Definitions                                                                     */
+/**************************************************************************************************/
+static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
 	lcz_power_measure_now_msg_t *fmsg = (lcz_power_measure_now_msg_t *)msg;
 
@@ -123,8 +110,7 @@ static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver,
 	return DISPATCH_OK;
 }
 
-static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver,
-				       FwkMsg_t *msg)
+static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
 	lcz_power_mode_msg_t *fmsg = (lcz_power_mode_msg_t *)msg;
 
@@ -133,8 +119,7 @@ static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver,
 	}
 
 	if (fmsg->enabled == true && timer_enabled == false) {
-		k_timer_start(&lcz_power_timer, K_MSEC(timer_interval),
-			      K_MSEC(timer_interval));
+		k_timer_start(&lcz_power_timer, K_MSEC(timer_interval), K_MSEC(timer_interval));
 	} else if (fmsg->enabled == false && timer_enabled == true) {
 		k_timer_stop(&lcz_power_timer);
 	}
@@ -149,11 +134,10 @@ static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver,
 	return DISPATCH_OK;
 }
 
-static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver,
-					   FwkMsg_t *msg)
+static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
-	lcz_power_mode_msg_t *fmsg = (lcz_power_mode_msg_t *)BufferPool_Take(
-						sizeof(lcz_power_mode_msg_t));
+	lcz_power_mode_msg_t *fmsg =
+		(lcz_power_mode_msg_t *)BufferPool_Take(sizeof(lcz_power_mode_msg_t));
 
 	if (fmsg != NULL) {
 		fmsg->header.msgCode = FMC_LCZ_SENSOR_CONFIG_GET;
@@ -170,8 +154,7 @@ static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver,
 }
 
 #ifdef CONFIG_LCZ_POWER_POWER_FAILURE
-static DispatchResult_t lcz_power_fail_set(FwkMsgReceiver_t *receiver,
-				       FwkMsg_t *msg)
+static DispatchResult_t lcz_power_fail_set(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
 	lcz_power_fail_mode_msg_t *fmsg = (lcz_power_fail_mode_msg_t *)msg;
 
@@ -179,10 +162,8 @@ static DispatchResult_t lcz_power_fail_set(FwkMsgReceiver_t *receiver,
 		nrf_power_pofcon_set(NRF_POWER, true, fmsg->power_level);
 		nrf_power_int_enable(NRF_POWER, NRF_POWER_INT_POFWARN_MASK);
 	} else {
-		if (nrf_power_int_enable_check(NRF_POWER,
-					       NRF_POWER_INT_POFWARN_MASK)) {
-			nrf_power_int_disable(NRF_POWER,
-					      NRF_POWER_INT_POFWARN_MASK);
+		if (nrf_power_int_enable_check(NRF_POWER, NRF_POWER_INT_POFWARN_MASK)) {
+			nrf_power_int_disable(NRF_POWER, NRF_POWER_INT_POFWARN_MASK);
 		}
 		nrf_power_pofcon_set(NRF_POWER, false, NRF_POWER_POFTHR_V28);
 	}
@@ -190,20 +171,17 @@ static DispatchResult_t lcz_power_fail_set(FwkMsgReceiver_t *receiver,
 	return DISPATCH_OK;
 }
 
-static DispatchResult_t lcz_power_fail_get(FwkMsgReceiver_t *receiver,
-				       FwkMsg_t *msg)
+static DispatchResult_t lcz_power_fail_get(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
 	lcz_power_fail_mode_msg_t *fmsg =
-			(lcz_power_fail_mode_msg_t *)BufferPool_Take(
-					sizeof(lcz_power_fail_mode_msg_t));
+		(lcz_power_fail_mode_msg_t *)BufferPool_Take(sizeof(lcz_power_fail_mode_msg_t));
 
 	if (fmsg != NULL) {
 		fmsg->header.msgCode = FMC_LCZ_SENSOR_TRIGGER_GET;
 		fmsg->header.txId = FWK_ID_LCZ_POWER;
 		fmsg->header.rxId = msg->header.txId;
 		fmsg->instance = 0;
-		fmsg->power_level = nrf_power_pofcon_get(NRF_POWER,
-							 &fmsg->enabled);
+		fmsg->power_level = nrf_power_pofcon_get(NRF_POWER, &fmsg->enabled);
 
 		Framework_Send(msg->header.txId, (FwkMsg_t *)fmsg);
 	}
@@ -213,24 +191,19 @@ static DispatchResult_t lcz_power_fail_get(FwkMsgReceiver_t *receiver,
 #endif
 
 #ifdef CONFIG_REBOOT
-static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver,
-					 FwkMsg_t *msg)
+static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
 	lcz_power_reboot_msg_t *fmsg = (lcz_power_reboot_msg_t *)msg;
 
 	/* Log panic will cause all buffered logs to be output */
 	LOG_INF("Rebooting module%s...",
-		(fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ?
-			" into UART bootloader" :
-			""));
+		(fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ? " into UART bootloader" : ""));
 #if defined(CONFIG_LOG) && !defined(CONFIG_LOG_MODE_MINIMAL)
 	log_panic();
 #endif
 
 	/* And reboot the module */
-	sys_reboot((fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ?
-						GPREGRET_BOOTLOADER_VALUE :
-						0));
+	sys_reboot((fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ? GPREGRET_BOOTLOADER_VALUE : 0));
 }
 #endif
 
@@ -259,15 +232,14 @@ static FwkMsgHandler_t *lcz_power_dispatcher(FwkMsgCode_t msg_code)
 
 static void lcz_power_thread(void *arg1, void *arg2, void *arg3)
 {
-        FwkMsgTask_t *task = (FwkMsgTask_t *)arg1;
+	FwkMsgTask_t *task = (FwkMsgTask_t *)arg1;
 
-        while (true) {
-                Framework_MsgReceiver(&task->rxer);
-        }
+	while (true) {
+		Framework_MsgReceiver(&task->rxer);
+	}
 }
 
-static bool lcz_power_measure_adc(const struct device *adc_dev,
-				  enum adc_gain gain,
+static bool lcz_power_measure_adc(const struct device *adc_dev, enum adc_gain gain,
 				  const struct adc_sequence sequence)
 {
 	int ret = 0;
@@ -317,8 +289,7 @@ static void lcz_power_run(FwkId_t *target)
 	locking_give(LOCKING_ID_adc);
 
 	lcz_power_measure_msg_t *fmsg =
-			(lcz_power_measure_msg_t *)BufferPool_Take(
-					sizeof(lcz_power_measure_msg_t));
+		(lcz_power_measure_msg_t *)BufferPool_Take(sizeof(lcz_power_measure_msg_t));
 
 	if (fmsg != NULL) {
 		fmsg->header.msgCode = FMC_LCZ_SENSOR_MEASURED;
@@ -326,8 +297,8 @@ static void lcz_power_run(FwkId_t *target)
 		fmsg->instance = 0;
 		fmsg->configuration = LCZ_POWER_CONFIGURATION_DIRECT;
 		fmsg->gain = ADC_GAIN_1_6;
-		fmsg->voltage = (float)m_sample_buffer / ADC_LIMIT_VALUE *
-				ADC_REFERENCE_VOLTAGE * ADC_GAIN_FACTOR_SIX;
+		fmsg->voltage = (float)m_sample_buffer / ADC_LIMIT_VALUE * ADC_REFERENCE_VOLTAGE *
+				ADC_GAIN_FACTOR_SIX;
 
 		FwkMsg_FilteredTargettedSend((FwkMsg_t *)fmsg, target,
 					     sizeof(lcz_power_measure_msg_t));
@@ -353,37 +324,28 @@ static void system_workq_lcz_power_fail_handler(struct k_work *item)
 }
 #endif
 
-/******************************************************************************/
-/* Interrupt Service Routines                                                 */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Interrupt Service Routines                                                                     */
+/**************************************************************************************************/
 static void lcz_power_timer_callback(struct k_timer *timer_id)
 {
-	/* Add item to system work queue so that it can be handled in task
-	 * context because ADC cannot be used in interrupt context (mutex)
+	/* Add item to system work queue so that it can be handled in task context because ADC
+	 * cannot be used in interrupt context (mutex)
 	 */
 	k_work_submit(&lcz_power_work);
 }
 
 #ifdef CONFIG_LCZ_POWER_POWER_FAILURE
-void nrfx_power_clock_irq_handler(void)
+static void power_failure_handler(void)
 {
-#ifdef CONFIG_MPSL
-        MPSL_IRQ_CLOCK_Handler();
-#endif
-
-	if (NRF_POWER->EVENTS_POFWARN == 1) {
-		/* Power failure warning, clear event and queue up a work item
-		 * to send a message
-		 */
-		NRF_POWER->EVENTS_POFWARN = 0;
-		k_work_submit(&lcz_power_fail_work);
-	}
+	/* Power failure warning, queue up a work item to send a message */
+	k_work_submit(&lcz_power_fail_work);
 }
 #endif
 
-/******************************************************************************/
-/* SYS INIT                                                                   */
-/******************************************************************************/
+/**************************************************************************************************/
+/* SYS INIT                                                                                       */
+/**************************************************************************************************/
 static int lcz_power_init(const struct device *device)
 {
 	ARG_UNUSED(device);
@@ -393,7 +355,10 @@ static int lcz_power_init(const struct device *device)
 	k_work_init(&lcz_power_work, system_workq_lcz_power_timer_handler);
 
 #ifdef CONFIG_LCZ_POWER_POWER_FAILURE
+	nrfx_power_pofwarn_config_t power_handler;
 	k_work_init(&lcz_power_fail_work, system_workq_lcz_power_fail_handler);
+	power_handler.handler = power_failure_handler;
+	nrfx_power_pof_init(&power_handler);
 #endif
 
 	/* Create thread for framework message processing */
@@ -407,11 +372,9 @@ static int lcz_power_init(const struct device *device)
 	Framework_RegisterTask(&lcz_power_task);
 
 	lcz_power_task.pTid =
-		k_thread_create(&lcz_power_task.threadData,
-				lcz_power_thread_stack,
-				K_THREAD_STACK_SIZEOF(lcz_power_thread_stack),
-				lcz_power_thread, &lcz_power_task, NULL, NULL,
-				LCZ_POWER_PRIORITY, 0, K_NO_WAIT);
+		k_thread_create(&lcz_power_task.threadData, lcz_power_thread_stack,
+				K_THREAD_STACK_SIZEOF(lcz_power_thread_stack), lcz_power_thread,
+				&lcz_power_task, NULL, NULL, LCZ_POWER_PRIORITY, 0, K_NO_WAIT);
 
 	k_thread_name_set(lcz_power_task.pTid, "lcz_power");
 

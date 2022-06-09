@@ -65,6 +65,7 @@ config LCZ_ADC_ALWAYS_SAMPLING
 config LCZ_POWER_POWER_FAILURE
 	bool "Enable power failure comparator feature"
 	depends on LCZ_POWER_TYPE_DIRECT
+	select NRFX_POWER
 
 config LCZ_POWER_THREAD_QUEUE_DEPTH
 	int "Queue depth of the message queue for the LCZ_POWER thread"
