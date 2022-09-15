@@ -1,7 +1,7 @@
 #
 # Copyright (c) 2022 Laird Connectivity
 #
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-LairdConnectivity-Clause
 #
 
 # Splitting ADC and reset could make dependencies cleaner
@@ -12,19 +12,17 @@ config LCZ_POWER
 	select NRFX_SAADC
 	select ADC_NRFX_SAADC
 	select REBOOT
-	select FRAMEWORK
+	depends on FRAMEWORK
 	select FWK_AUTO_GENERATE_FILES
 	select FWK_SENSOR
-	select LOCKING
+	depends on LOCKING
 
 if LCZ_POWER
 
 config LCZ_POWER_INIT_PRIORITY
-        int "Init priority Application for power module"
-        range 0 99
-        default 0
-        help
-          Recommended to be higher than main thread init priority.
+	int "Init priority for power module (Application)"
+	range 0 99
+	default APPLICATION_INIT_PRIORITY
 
 choice LCZ_POWER_TYPE
 	prompt "Power monitoring type"
@@ -54,9 +52,15 @@ config LCZ_CUSTOM_FATAL_ERROR_HANDLER
 	bool "Custom fatal error handler that resets on fatal error"
 	depends on !BT_LL_NRFXLIB_DEFAULT
 
+config LCZ_ADC_START_SAMPLE_AFTER_INIT
+	bool "Sample after init"
+	default y
+	help
+	  Automatically start sampling after sysinit
+
 config LCZ_ADC_SAMPLE_PERIOD
 	int "Number of seconds in between ADC readings"
-	default 15
+	default 30
 
 config LCZ_ADC_ALWAYS_SAMPLING
 	bool "Keeps the ADC sampling always active regardless of BLE state"
@@ -75,6 +79,6 @@ config LCZ_POWER_THREAD_QUEUE_DEPTH
 config LCZ_POWER_THREAD_STACK_SIZE
 	int "Stack size (in bytes) of the LCZ_POWER thread"
 	range 512 4096
-	default 1024
+	default 512
 
 endif # LCZ_POWER

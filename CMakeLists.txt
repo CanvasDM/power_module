@@ -3,7 +3,7 @@
 #
 # Copyright (c) 2020-2022 Laird Connectivity
 #
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: LicenseRef-LairdConnectivity-Clause
 #
 
 if((CONFIG_LCZ_POWER_TYPE_EXTERNAL) OR (CONFIG_LCZ_POWER_TYPE_DIRECT))

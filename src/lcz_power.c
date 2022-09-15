@@ -4,15 +4,15 @@
  *
  * Copyright (c) 2020-2022 Laird Connectivity
  *
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-License-Identifier: LicenseRef-LairdConnectivity-Clause
  */
 
 #include <logging/log.h>
 LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
 
-/******************************************************************************/
-/* Includes                                                                   */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Includes                                                                                       */
+/**************************************************************************************************/
 #include <stdio.h>
 #include <zephyr/types.h>
 #include <kernel.h>
@@ -35,9 +35,9 @@ LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
 
 #include "lcz_power.h"
 
-/******************************************************************************/
-/* Local Constant, Macro and Type Definitions                                 */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Local Constant, Macro and Type Definitions                                                     */
+/**************************************************************************************************/
 #define LCZ_POWER_PRIORITY K_PRIO_PREEMPT(1)
 
 /* clang-format off */
@@ -59,19 +59,18 @@ LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
 #define MEASURE_STATUS_DISABLE       0
 /* clang-format on */
 
-/******************************************************************************/
-/* Local Data Definitions                                                     */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Local Data Definitions                                                                         */
+/**************************************************************************************************/
 /* NEED CONFIG_ADC_CONFIGURABLE_INPUTS */
 
-static struct adc_channel_cfg m_1st_channel_cfg = {
-	.reference = ADC_REF_INTERNAL,
-	.acquisition_time = ADC_ACQUISITION_TIME,
-	.channel_id = ADC_CHANNEL_ID,
+static struct adc_channel_cfg m_1st_channel_cfg = { .reference = ADC_REF_INTERNAL,
+						    .acquisition_time = ADC_ACQUISITION_TIME,
+						    .channel_id = ADC_CHANNEL_ID,
 #if defined CONFIG_BOARD_PINNACLE_100_DVK
-	.input_positive = NRF_SAADC_INPUT_AIN5
+						    .input_positive = NRF_SAADC_INPUT_AIN5
 #elif defined CONFIG_BOARD_MG100
-	.input_positive = NRF_SAADC_INPUT_AIN0
+						    .input_positive = NRF_SAADC_INPUT_AIN0
 #else
 #error "An ADC input must be defined for this hardware variant."
 #endif
@@ -84,48 +83,41 @@ static bool timer_enabled;
 static uint32_t timer_interval = DEFAULT_LCZ_POWER_TIMER_PERIOD_MS;
 
 static FwkMsgTask_t lcz_power_task;
-K_THREAD_STACK_DEFINE(lcz_power_thread_stack,
-		      CONFIG_LCZ_POWER_THREAD_STACK_SIZE);
-K_MSGQ_DEFINE(lcz_power_queue, FWK_QUEUE_ENTRY_SIZE,
-	      CONFIG_LCZ_POWER_THREAD_QUEUE_DEPTH, FWK_QUEUE_ALIGNMENT);
+K_THREAD_STACK_DEFINE(lcz_power_thread_stack, CONFIG_LCZ_POWER_THREAD_STACK_SIZE);
+K_MSGQ_DEFINE(lcz_power_queue, FWK_QUEUE_ENTRY_SIZE, CONFIG_LCZ_POWER_THREAD_QUEUE_DEPTH,
+	      FWK_QUEUE_ALIGNMENT);
 
-/******************************************************************************/
-/* Local Function Prototypes                                                  */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Local Function Prototypes                                                                      */
+/**************************************************************************************************/
 static int lcz_power_init(const struct device *device);
-static bool lcz_power_measure_adc(const struct device *adc_dev,
-				  enum adc_gain gain,
+static bool lcz_power_measure_adc(const struct device *adc_dev, enum adc_gain gain,
 				  const struct adc_sequence sequence);
 static void lcz_power_run(FwkId_t *target);
 static void system_workq_lcz_power_timer_handler(struct k_work *item);
 static void lcz_power_timer_callback(struct k_timer *timer_id);
 
-static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver,
-					  FwkMsg_t *msg);
-static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver,
-				       FwkMsg_t *msg);
-static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver,
-					   FwkMsg_t *msg);
+static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
+static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
+static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
 
 #ifdef CONFIG_REBOOT
-static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver,
-					 FwkMsg_t *msg);
+static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
 #endif
 
 static FwkMsgHandler_t *lcz_power_dispatcher(FwkMsgCode_t msg_code);
 
 static void lcz_power_thread(void *arg1, void *arg2, void *arg3);
 
-/******************************************************************************/
-/* Global Function Definitions                                                */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Global Function Definitions                                                                    */
+/**************************************************************************************************/
 SYS_INIT(lcz_power_init, APPLICATION, CONFIG_LCZ_POWER_INIT_PRIORITY);
 
-/******************************************************************************/
-/* Local Function Definitions                                                 */
-/******************************************************************************/
-static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver,
-					      FwkMsg_t *msg)
+/**************************************************************************************************/
+/* Local Function Definitions                                                                     */
+/**************************************************************************************************/
+static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
 	lcz_power_measure_now_msg_t *fmsg = (lcz_power_measure_now_msg_t *)msg;
 
@@ -134,8 +126,7 @@ static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver,
 	return DISPATCH_OK;
 }
 
-static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver,
-					   FwkMsg_t *msg)
+static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
 	lcz_power_mode_msg_t *fmsg = (lcz_power_mode_msg_t *)msg;
 
@@ -144,8 +135,7 @@ static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver,
 	}
 
 	if (fmsg->enabled == true && timer_enabled == false) {
-		k_timer_start(&lcz_power_timer, K_MSEC(timer_interval),
-			      K_MSEC(timer_interval));
+		k_timer_start(&lcz_power_timer, K_MSEC(timer_interval), K_MSEC(timer_interval));
 	} else if (fmsg->enabled == false && timer_enabled == true) {
 		k_timer_stop(&lcz_power_timer);
 	}
@@ -160,11 +150,10 @@ static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver,
 	return DISPATCH_OK;
 }
 
-static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver,
-					       FwkMsg_t *msg)
+static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
-	lcz_power_mode_msg_t *fmsg = (lcz_power_mode_msg_t *)BufferPool_Take(
-						sizeof(lcz_power_mode_msg_t));
+	lcz_power_mode_msg_t *fmsg =
+		(lcz_power_mode_msg_t *)BufferPool_Take(sizeof(lcz_power_mode_msg_t));
 
 	if (fmsg != NULL) {
 		fmsg->header.msgCode = FMC_LCZ_SENSOR_CONFIG_GET;
@@ -181,24 +170,19 @@ static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver,
 }
 
 #ifdef CONFIG_REBOOT
-static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver,
-					 FwkMsg_t *msg)
+static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
 	lcz_power_reboot_msg_t *fmsg = (lcz_power_reboot_msg_t *)msg;
 
 	/* Log panic will cause all buffered logs to be output */
 	LOG_INF("Rebooting module%s...",
-		(fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ?
-			" into UART bootloader" :
-			""));
+		(fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ? " into UART bootloader" : ""));
 #if defined(CONFIG_LOG) && !defined(CONFIG_LOG_MODE_MINIMAL)
 	log_panic();
 #endif
 
 	/* And reboot the module */
-	sys_reboot((fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ?
-						GPREGRET_BOOTLOADER_VALUE :
-						0));
+	sys_reboot((fmsg->reboot_type == REBOOT_TYPE_BOOTLOADER ? GPREGRET_BOOTLOADER_VALUE : 0));
 }
 #endif
 
@@ -221,15 +205,14 @@ static FwkMsgHandler_t *lcz_power_dispatcher(FwkMsgCode_t msg_code)
 
 static void lcz_power_thread(void *arg1, void *arg2, void *arg3)
 {
-        FwkMsgTask_t *task = (FwkMsgTask_t *)arg1;
+	FwkMsgTask_t *task = (FwkMsgTask_t *)arg1;
 
-        while (true) {
-                Framework_MsgReceiver(&task->rxer);
-        }
+	while (true) {
+		Framework_MsgReceiver(&task->rxer);
+	}
 }
 
-static bool lcz_power_measure_adc(const struct device *adc_dev,
-				  enum adc_gain gain,
+static bool lcz_power_measure_adc(const struct device *adc_dev, enum adc_gain gain,
 				  const struct adc_sequence sequence)
 {
 	int ret = 0;
@@ -278,8 +261,8 @@ static void lcz_power_run(FwkId_t *target)
 	locking_take(LOCKING_ID_adc, K_FOREVER);
 
 	/* Enable power supply voltage to be monitored */
-	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT),
-			   MEASURE_ENABLE_PIN, MEASURE_STATUS_ENABLE);
+	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
+			   MEASURE_STATUS_ENABLE);
 	if (ret) {
 		LOG_ERR("Error setting power GPIO");
 		return;
@@ -317,8 +300,8 @@ static void lcz_power_run(FwkId_t *target)
 	}
 
 	/* Disable the voltage monitoring FET */
-	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT),
-			   MEASURE_ENABLE_PIN, MEASURE_STATUS_DISABLE);
+	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
+			   MEASURE_STATUS_DISABLE);
 
 	if (ret) {
 		LOG_ERR("Error setting power GPIO");
@@ -327,8 +310,7 @@ static void lcz_power_run(FwkId_t *target)
 	locking_give(LOCKING_ID_adc);
 
 	lcz_power_measure_msg_t *fmsg =
-			(lcz_power_measure_msg_t *)BufferPool_Take(
-					sizeof(lcz_power_measure_msg_t));
+		(lcz_power_measure_msg_t *)BufferPool_Take(sizeof(lcz_power_measure_msg_t));
 
 	if (fmsg != NULL) {
 		fmsg->header.msgCode = FMC_LCZ_SENSOR_MEASURED;
@@ -344,27 +326,26 @@ static void lcz_power_run(FwkId_t *target)
 			fmsg->gain = ADC_GAIN_1_2;
 		}
 
-		fmsg->voltage = (float)m_sample_buffer / ADC_LIMIT_VALUE *
-				ADC_REFERENCE_VOLTAGE *
-				ADC_VOLTAGE_TOP_RESISTOR /
-				ADC_VOLTAGE_BOTTOM_RESISTOR * scaling;
+		fmsg->voltage = (float)m_sample_buffer / ADC_LIMIT_VALUE * ADC_REFERENCE_VOLTAGE *
+				ADC_VOLTAGE_TOP_RESISTOR / ADC_VOLTAGE_BOTTOM_RESISTOR * scaling;
 
 		if (target == NULL) {
 #ifdef CONFIG_FILTER
-			/* With filtering, send targetted message to filter */
+			/* With filtering, send targeted message to filter */
 			fmsg->header.rxId = FWK_ID_EVENT_FILTER;
 			Framework_Send(FWK_ID_EVENT_FILTER, (FwkMsg_t *)fmsg);
 #else
 			/* Without filtering, send broadcast */
 			fmsg->header.rxId = FWK_ID_RESERVED;
-			Framework_Broadcast((FwkMsg_t *)fmsg,
-					    sizeof(lcz_power_measure_msg_t));
+			Framework_Broadcast((FwkMsg_t *)fmsg, sizeof(lcz_power_measure_msg_t));
 #endif
 		} else {
 			/* Targetted message, send only to target */
 			fmsg->header.rxId = *target;
 			Framework_Send(*target, (FwkMsg_t *)fmsg);
 		}
+	} else {
+		LOG_WRN("Could not allocate lcz_power_measure_msg_t msg");
 	}
 }
 
@@ -373,9 +354,9 @@ static void system_workq_lcz_power_timer_handler(struct k_work *item)
 	lcz_power_run(NULL);
 }
 
-/******************************************************************************/
-/* Interrupt Service Routines                                                 */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Interrupt Service Routines                                                                     */
+/**************************************************************************************************/
 static void lcz_power_timer_callback(struct k_timer *timer_id)
 {
 	/* Add item to system work queue so that it can be handled in task
@@ -384,9 +365,9 @@ static void lcz_power_timer_callback(struct k_timer *timer_id)
 	k_work_submit(&lcz_power_work);
 }
 
-/******************************************************************************/
-/* SYS INIT                                                                   */
-/******************************************************************************/
+/**************************************************************************************************/
+/* SYS INIT                                                                                       */
+/**************************************************************************************************/
 static int lcz_power_init(const struct device *device)
 {
 	ARG_UNUSED(device);
@@ -398,15 +379,15 @@ static int lcz_power_init(const struct device *device)
 
 	/* Configure the VIN_ADC_EN pin as an output set low to disable the
 	   power supply voltage measurement */
-	ret = gpio_pin_configure(device_get_binding(MEASURE_ENABLE_PORT),
-				 MEASURE_ENABLE_PIN, (GPIO_OUTPUT));
+	ret = gpio_pin_configure(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
+				 (GPIO_OUTPUT));
 	if (ret) {
 		LOG_ERR("Error configuring power GPIO");
 		return -EIO;
 	}
 
-	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT),
-			   MEASURE_ENABLE_PIN, MEASURE_STATUS_DISABLE);
+	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
+			   MEASURE_STATUS_DISABLE);
 	if (ret) {
 		LOG_ERR("Error setting power GPIO");
 		return -EIO;
@@ -423,13 +404,17 @@ static int lcz_power_init(const struct device *device)
 	Framework_RegisterTask(&lcz_power_task);
 
 	lcz_power_task.pTid =
-		k_thread_create(&lcz_power_task.threadData,
-				lcz_power_thread_stack,
-				K_THREAD_STACK_SIZEOF(lcz_power_thread_stack),
-				lcz_power_thread, &lcz_power_task, NULL, NULL,
-				LCZ_POWER_PRIORITY, 0, K_NO_WAIT);
+		k_thread_create(&lcz_power_task.threadData, lcz_power_thread_stack,
+				K_THREAD_STACK_SIZEOF(lcz_power_thread_stack), lcz_power_thread,
+				&lcz_power_task, NULL, NULL, LCZ_POWER_PRIORITY, 0, K_NO_WAIT);
 
 	k_thread_name_set(lcz_power_task.pTid, "lcz_power");
+
+#if defined(CONFIG_LCZ_ADC_START_SAMPLE_AFTER_INIT)
+	k_timer_start(&lcz_power_timer, K_MSEC(timer_interval), K_MSEC(timer_interval));
+	timer_enabled = true;
+#endif
+	LOG_DBG("Initialized!");
 
 	return 0;
 }
