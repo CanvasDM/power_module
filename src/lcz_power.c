@@ -77,8 +77,6 @@ static struct adc_channel_cfg m_1st_channel_cfg = { .reference = ADC_REF_INTERNA
 };
 
 static int16_t m_sample_buffer;
-static struct k_timer lcz_power_timer;
-static struct k_work lcz_power_work;
 static bool timer_enabled;
 static uint32_t timer_interval = DEFAULT_LCZ_POWER_TIMER_PERIOD_MS;
 
@@ -94,8 +92,6 @@ static int lcz_power_init(const struct device *device);
 static bool lcz_power_measure_adc(const struct device *adc_dev, enum adc_gain gain,
 				  const struct adc_sequence sequence);
 static void lcz_power_run(FwkId_t *target);
-static void system_workq_lcz_power_timer_handler(struct k_work *item);
-static void lcz_power_timer_callback(struct k_timer *timer_id);
 
 static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
 static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
@@ -135,9 +131,10 @@ static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver, FwkMsg_t 
 	}
 
 	if (fmsg->enabled == true && timer_enabled == false) {
-		k_timer_start(&lcz_power_timer, K_MSEC(timer_interval), K_MSEC(timer_interval));
+		Framework_ChangeTimerPeriod(&lcz_power_task, K_MSEC(timer_interval),
+					    K_MSEC(timer_interval));
 	} else if (fmsg->enabled == false && timer_enabled == true) {
-		k_timer_stop(&lcz_power_timer);
+		Framework_StopTimer(&lcz_power_task);
 	}
 
 	timer_enabled = fmsg->enabled;
@@ -188,7 +185,7 @@ static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver, FwkMsg_t *m
 
 static FwkMsgHandler_t *lcz_power_dispatcher(FwkMsgCode_t msg_code)
 {
-	if (msg_code == FMC_LCZ_SENSOR_MEASURE_NOW) {
+	if (msg_code == FMC_LCZ_SENSOR_MEASURE_NOW || msg_code == FMC_PERIODIC) {
 		return lcz_power_measure_now;
 	} else if (msg_code == FMC_LCZ_SENSOR_CONFIG_SET) {
 		return lcz_power_mode_set;
@@ -349,22 +346,6 @@ static void lcz_power_run(FwkId_t *target)
 	}
 }
 
-static void system_workq_lcz_power_timer_handler(struct k_work *item)
-{
-	lcz_power_run(NULL);
-}
-
-/**************************************************************************************************/
-/* Interrupt Service Routines                                                                     */
-/**************************************************************************************************/
-static void lcz_power_timer_callback(struct k_timer *timer_id)
-{
-	/* Add item to system work queue so that it can be handled in task
-	 * context because ADC cannot be used in interrupt context (mutex)
-	 */
-	k_work_submit(&lcz_power_work);
-}
-
 /**************************************************************************************************/
 /* SYS INIT                                                                                       */
 /**************************************************************************************************/
@@ -372,10 +353,6 @@ static int lcz_power_init(const struct device *device)
 {
 	ARG_UNUSED(device);
 	int ret;
-
-	/* Setup work-queue and repetitive timer */
-	k_timer_init(&lcz_power_timer, lcz_power_timer_callback, NULL);
-	k_work_init(&lcz_power_work, system_workq_lcz_power_timer_handler);
 
 	/* Configure the VIN_ADC_EN pin as an output set low to disable the
 	   power supply voltage measurement */
@@ -397,8 +374,8 @@ static int lcz_power_init(const struct device *device)
 	lcz_power_task.rxer.id = FWK_ID_LCZ_POWER;
 	lcz_power_task.rxer.rxBlockTicks = K_FOREVER;
 	lcz_power_task.rxer.pMsgDispatcher = lcz_power_dispatcher;
-	lcz_power_task.timerDurationTicks = K_MSEC(0);
-	lcz_power_task.timerPeriodTicks = K_MSEC(0);
+	lcz_power_task.timerDurationTicks = K_MSEC(timer_interval);
+	lcz_power_task.timerPeriodTicks = K_MSEC(timer_interval);
 	lcz_power_task.rxer.pQueue = &lcz_power_queue;
 
 	Framework_RegisterTask(&lcz_power_task);
@@ -411,7 +388,7 @@ static int lcz_power_init(const struct device *device)
 	k_thread_name_set(lcz_power_task.pTid, "lcz_power");
 
 #if defined(CONFIG_LCZ_ADC_START_SAMPLE_AFTER_INIT)
-	k_timer_start(&lcz_power_timer, K_MSEC(timer_interval), K_MSEC(timer_interval));
+	Framework_StartTimer(&lcz_power_task);
 	timer_enabled = true;
 #endif
 	LOG_DBG("Initialized!");
