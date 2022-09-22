@@ -8,7 +8,8 @@
  */
 
 #include <logging/log.h>
-LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
+#define MODULE_NAME lcz_power
+LOG_MODULE_REGISTER(MODULE_NAME, CONFIG_LCZ_POWER_LOG_LEVEL);
 
 /**************************************************************************************************/
 /* Includes                                                                                       */
@@ -41,13 +42,20 @@ LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
 #define LCZ_POWER_PRIORITY K_PRIO_PREEMPT(1)
 
 /* clang-format off */
-/* Port and pin number of the voltage measurement enabling functionality */
 #if defined(CONFIG_BOARD_MG100)
-#define MEASURE_ENABLE_PORT DT_PROP(DT_NODELABEL(gpio1), label)
-#define MEASURE_ENABLE_PIN 10
+#define MEASURE_ENABLE_PORT 	DT_PROP(DT_NODELABEL(gpio1), label)
+#define MEASURE_ENABLE_PIN 		10
+#define CHG_STATE_PORT          DT_PROP(DT_NODELABEL(gpio0), label)
+#define CHG_STATE_PIN           30
+#define PWR_STATE_PORT          DT_PROP(DT_NODELABEL(gpio1), label)
+#define PWR_STATE_PIN           4
+#define CHG_PIN_CHARGING        1
+#define CHG_PIN_NOT_CHARGING    0
+#define PWR_PIN_PWR_PRESENT     1
+#define PWR_PIN_PWR_NOT_PRESENT 0
 #elif defined(CONFIG_BOARD_PINNACLE_100_DVK)
-#define MEASURE_ENABLE_PORT DT_PROP(DT_NODELABEL(gpio0), label)
-#define MEASURE_ENABLE_PIN 28
+#define MEASURE_ENABLE_PORT 	DT_PROP(DT_NODELABEL(gpio0), label)
+#define MEASURE_ENABLE_PIN 		28
 #else
 #error "A measurement enable pin must be defined for this board."
 #endif
@@ -55,8 +63,8 @@ LOG_MODULE_REGISTER(lcz_power, CONFIG_LCZ_POWER_LOG_LEVEL);
 /* clang-format off */
 #define ADC_VOLTAGE_TOP_RESISTOR     14.1
 #define ADC_VOLTAGE_BOTTOM_RESISTOR  1.1
-#define MEASURE_STATUS_ENABLE        1
-#define MEASURE_STATUS_DISABLE       0
+#define PIN_ACTIVE        			 1
+#define PIN_INACTIVE       			 0
 /* clang-format on */
 
 /**************************************************************************************************/
@@ -85,6 +93,14 @@ K_THREAD_STACK_DEFINE(lcz_power_thread_stack, CONFIG_LCZ_POWER_THREAD_STACK_SIZE
 K_MSGQ_DEFINE(lcz_power_queue, FWK_QUEUE_ENTRY_SIZE, CONFIG_LCZ_POWER_THREAD_QUEUE_DEPTH,
 	      FWK_QUEUE_ALIGNMENT);
 
+#if defined(CONFIG_BOARD_MG100)
+static struct k_work chg_state_work;
+static const struct device *battery_chg_state_dev;
+static struct gpio_callback battery_chg_state_cb;
+static struct gpio_callback battery_pwr_state_cb;
+static const struct device *battery_pwr_state_dev;
+#endif
+
 /**************************************************************************************************/
 /* Local Function Prototypes                                                                      */
 /**************************************************************************************************/
@@ -105,10 +121,40 @@ static FwkMsgHandler_t *lcz_power_dispatcher(FwkMsgCode_t msg_code);
 
 static void lcz_power_thread(void *arg1, void *arg2, void *arg3);
 
+#if defined(CONFIG_BOARD_MG100)
+static void battery_state_changed(const struct device *Dev, struct gpio_callback *Cb,
+				  uint32_t Pins);
+static void chg_state_handler(struct k_work *Item);
+#endif
+
 /**************************************************************************************************/
 /* Global Function Definitions                                                                    */
 /**************************************************************************************************/
 SYS_INIT(lcz_power_init, APPLICATION, CONFIG_LCZ_POWER_INIT_PRIORITY);
+
+#if defined(CONFIG_BOARD_MG100)
+uint8_t lcz_power_get_battery_state(void)
+{
+	int pin_state = 0;
+	uint8_t pwr_state = 0;
+
+	pin_state = gpio_pin_get(battery_pwr_state_dev, PWR_STATE_PIN);
+	if (pin_state == PWR_PIN_PWR_PRESENT) {
+		pwr_state = BATTERY_EXT_POWER_STATE;
+	} else {
+		pwr_state = BATTERY_DISCHARGING_STATE;
+	}
+
+	pin_state = gpio_pin_get(battery_chg_state_dev, CHG_STATE_PIN);
+	if (pin_state == CHG_PIN_CHARGING) {
+		pwr_state |= BATTERY_CHARGING_STATE;
+	} else {
+		pwr_state |= BATTERY_NOT_CHARGING_STATE;
+	}
+
+	return pwr_state;
+}
+#endif
 
 /**************************************************************************************************/
 /* Local Function Definitions                                                                     */
@@ -149,6 +195,8 @@ static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver, FwkMsg_t 
 
 static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
 {
+	int ret;
+
 	lcz_power_mode_msg_t *fmsg =
 		(lcz_power_mode_msg_t *)BufferPool_Take(sizeof(lcz_power_mode_msg_t));
 
@@ -160,7 +208,11 @@ static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver, FwkMs
 		fmsg->enabled = timer_enabled;
 		fmsg->interval_time = timer_interval;
 
-		Framework_Send(msg->header.txId, (FwkMsg_t *)fmsg);
+		ret = Framework_Send(msg->header.txId, (FwkMsg_t *)fmsg);
+		if (ret != 0) {
+			LOG_ERR("Failed to send sensor config [%d]", ret);
+			BufferPool_Free(fmsg);
+		}
 	}
 
 	return DISPATCH_OK;
@@ -204,6 +256,13 @@ static void lcz_power_thread(void *arg1, void *arg2, void *arg3)
 {
 	FwkMsgTask_t *task = (FwkMsgTask_t *)arg1;
 
+#if defined(CONFIG_LCZ_ADC_START_SAMPLE_AFTER_INIT)
+	Framework_StartTimer(&lcz_power_task);
+	timer_enabled = true;
+	/* Get initial reading immediately */
+	lcz_power_run(NULL);
+#endif
+
 	while (true) {
 		Framework_MsgReceiver(&task->rxer);
 	}
@@ -236,7 +295,7 @@ static void lcz_power_run(FwkId_t *target)
 {
 	int ret;
 	bool finished = false;
-	uint8_t scaling;
+	float scaling;
 
 	/* Find the ADC device */
 	const struct device *adc_dev = device_get_binding(ADC0);
@@ -258,8 +317,7 @@ static void lcz_power_run(FwkId_t *target)
 	locking_take(LOCKING_ID_adc, K_FOREVER);
 
 	/* Enable power supply voltage to be monitored */
-	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
-			   MEASURE_STATUS_ENABLE);
+	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN, PIN_ACTIVE);
 	if (ret) {
 		LOG_ERR("Error setting power GPIO");
 		return;
@@ -298,7 +356,7 @@ static void lcz_power_run(FwkId_t *target)
 
 	/* Disable the voltage monitoring FET */
 	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
-			   MEASURE_STATUS_DISABLE);
+			   PIN_INACTIVE);
 
 	if (ret) {
 		LOG_ERR("Error setting power GPIO");
@@ -322,29 +380,67 @@ static void lcz_power_run(FwkId_t *target)
 		} else if (scaling == ADC_GAIN_FACTOR_HALF) {
 			fmsg->gain = ADC_GAIN_1_2;
 		}
-
+		LOG_DBG("Voltage = %f / %f * %f * %f / %f * %f", (float)m_sample_buffer,
+			ADC_LIMIT_VALUE, ADC_REFERENCE_VOLTAGE, ADC_VOLTAGE_TOP_RESISTOR,
+			ADC_VOLTAGE_BOTTOM_RESISTOR, scaling);
 		fmsg->voltage = (float)m_sample_buffer / ADC_LIMIT_VALUE * ADC_REFERENCE_VOLTAGE *
 				ADC_VOLTAGE_TOP_RESISTOR / ADC_VOLTAGE_BOTTOM_RESISTOR * scaling;
-
+		LOG_DBG("Voltage: %f", fmsg->voltage);
 		if (target == NULL) {
 #ifdef CONFIG_FILTER
 			/* With filtering, send targeted message to filter */
 			fmsg->header.rxId = FWK_ID_EVENT_FILTER;
-			Framework_Send(FWK_ID_EVENT_FILTER, (FwkMsg_t *)fmsg);
+			ret = Framework_Send(FWK_ID_EVENT_FILTER, (FwkMsg_t *)fmsg);
 #else
 			/* Without filtering, send broadcast */
 			fmsg->header.rxId = FWK_ID_RESERVED;
-			Framework_Broadcast((FwkMsg_t *)fmsg, sizeof(lcz_power_measure_msg_t));
+			ret = Framework_Broadcast((FwkMsg_t *)fmsg,
+						  sizeof(lcz_power_measure_msg_t));
 #endif
 		} else {
-			/* Targetted message, send only to target */
+			/* Targeted message, send only to target */
 			fmsg->header.rxId = *target;
-			Framework_Send(*target, (FwkMsg_t *)fmsg);
+			ret = Framework_Send(*target, (FwkMsg_t *)fmsg);
+		}
+		if (ret != 0) {
+			BufferPool_Free(fmsg);
+			LOG_ERR("Failed to send voltage [%d]", ret);
 		}
 	} else {
 		LOG_WRN("Could not allocate lcz_power_measure_msg_t msg");
 	}
 }
+
+#if defined(CONFIG_BOARD_MG100)
+static void battery_state_changed(const struct device *Dev, struct gpio_callback *Cb, uint32_t Pins)
+{
+	k_work_submit(&chg_state_work);
+}
+
+static void chg_state_handler(struct k_work *Item)
+{
+	int ret;
+	uint8_t pwr_state = 0;
+	lcz_power_battery_msg_t *fmsg;
+
+	pwr_state = lcz_power_get_battery_state();
+
+	fmsg = (lcz_power_battery_msg_t *)BufferPool_Take(sizeof(lcz_power_battery_msg_t));
+	if (fmsg != NULL) {
+		fmsg->header.msgCode = FMC_LCZ_POWER_BATTERY_STATE;
+		fmsg->header.txId = FWK_ID_LCZ_POWER;
+		fmsg->battery_state = pwr_state;
+		fmsg->header.rxId = FWK_ID_RESERVED;
+		ret = Framework_Broadcast((FwkMsg_t *)fmsg, sizeof(lcz_power_battery_msg_t));
+		if (ret != 0) {
+			BufferPool_Free(fmsg);
+			LOG_ERR("Failed to send battery state [%d]", ret);
+		}
+	} else {
+		LOG_WRN("Could not allocate lcz_power_battery_msg_t msg");
+	}
+}
+#endif
 
 /**************************************************************************************************/
 /* SYS INIT                                                                                       */
@@ -355,20 +451,43 @@ static int lcz_power_init(const struct device *device)
 	int ret;
 
 	/* Configure the VIN_ADC_EN pin as an output set low to disable the
-	   power supply voltage measurement */
+	 * power supply voltage measurement
+	 */
 	ret = gpio_pin_configure(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
-				 (GPIO_OUTPUT));
+				 (GPIO_ACTIVE_HIGH | GPIO_OUTPUT_INACTIVE));
 	if (ret) {
 		LOG_ERR("Error configuring power GPIO");
 		return -EIO;
 	}
 
-	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
-			   MEASURE_STATUS_DISABLE);
+#if defined(CONFIG_BOARD_MG100)
+	k_work_init(&chg_state_work, chg_state_handler);
+	/* configure the charging state gpio  */
+	battery_chg_state_dev = device_get_binding(CHG_STATE_PORT);
+	ret = gpio_pin_configure(battery_chg_state_dev, CHG_STATE_PIN,
+				 (GPIO_INPUT | GPIO_INT_EDGE_BOTH | GPIO_ACTIVE_LOW));
+	ret |= gpio_pin_interrupt_configure(battery_chg_state_dev, CHG_STATE_PIN,
+					    (GPIO_INPUT | GPIO_INT_EDGE_BOTH | GPIO_ACTIVE_LOW));
+	gpio_init_callback(&battery_chg_state_cb, battery_state_changed, BIT(CHG_STATE_PIN));
+	ret |= gpio_add_callback(battery_chg_state_dev, &battery_chg_state_cb);
 	if (ret) {
-		LOG_ERR("Error setting power GPIO");
+		LOG_ERR("Error charge state input");
 		return -EIO;
 	}
+
+	/* configure the power state gpio */
+	battery_pwr_state_dev = device_get_binding(PWR_STATE_PORT);
+	ret = gpio_pin_configure(battery_pwr_state_dev, PWR_STATE_PIN,
+				 (GPIO_INPUT | GPIO_INT_EDGE_BOTH | GPIO_ACTIVE_LOW));
+	ret |= gpio_pin_interrupt_configure(battery_pwr_state_dev, PWR_STATE_PIN,
+					    (GPIO_INPUT | GPIO_INT_EDGE_BOTH | GPIO_ACTIVE_LOW));
+	gpio_init_callback(&battery_pwr_state_cb, battery_state_changed, BIT(PWR_STATE_PIN));
+	ret |= gpio_add_callback(battery_pwr_state_dev, &battery_pwr_state_cb);
+	if (ret) {
+		LOG_ERR("Error power state input");
+		return -EIO;
+	}
+#endif
 
 	/* Create thread for framework message processing */
 	lcz_power_task.rxer.id = FWK_ID_LCZ_POWER;
@@ -385,12 +504,8 @@ static int lcz_power_init(const struct device *device)
 				K_THREAD_STACK_SIZEOF(lcz_power_thread_stack), lcz_power_thread,
 				&lcz_power_task, NULL, NULL, LCZ_POWER_PRIORITY, 0, K_NO_WAIT);
 
-	k_thread_name_set(lcz_power_task.pTid, "lcz_power");
+	k_thread_name_set(lcz_power_task.pTid, STRINGIFY(MODULE_NAME));
 
-#if defined(CONFIG_LCZ_ADC_START_SAMPLE_AFTER_INIT)
-	Framework_StartTimer(&lcz_power_task);
-	timer_enabled = true;
-#endif
 	LOG_DBG("Initialized!");
 
 	return 0;

@@ -38,3 +38,10 @@ typedef struct {
 	FwkMsgHeader_t header;
 	uint8_t reboot_type;
 } lcz_power_reboot_msg_t;
+
+#if defined(CONFIG_BOARD_MG100)
+typedef struct {
+	FwkMsgHeader_t header;
+	uint8_t battery_state;
+} lcz_power_battery_msg_t;
+#endif

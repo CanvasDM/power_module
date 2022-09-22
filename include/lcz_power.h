@@ -9,9 +9,9 @@
 #ifndef __LCZ_POWER_H__
 #define __LCZ_POWER_H__
 
-/******************************************************************************/
-/* Includes                                                                   */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Includes                                                                                       */
+/**************************************************************************************************/
 #include <devicetree.h>
 #include <hal/nrf_power.h>
 
@@ -19,9 +19,9 @@
 extern "C" {
 #endif
 
-/******************************************************************************/
-/* Board definitions                                                          */
-/******************************************************************************/
+/**************************************************************************************************/
+/* Global Constants, Macros and Type Definitions                                                  */
+/**************************************************************************************************/
 
 /* Default and minimum measurement times between readings */
 #define DEFAULT_LCZ_POWER_TIMER_PERIOD_MS (CONFIG_LCZ_ADC_SAMPLE_PERIOD * 1000)
@@ -47,7 +47,29 @@ extern "C" {
 #define ADC_GAIN_FACTOR_ONE          1.0
 #define ADC_GAIN_FACTOR_HALF         0.5
 #define GPREGRET_BOOTLOADER_VALUE    0xb1
-/* clang-format on */
+
+#if defined(CONFIG_BOARD_MG100)
+/* values used to indicate the charger state */
+#define BATTERY_EXT_POWER_STATE     BIT(0)
+#define BATTERY_CHARGING_STATE      BIT(1)
+#define BATTERY_NOT_CHARGING_STATE  BIT(2)
+#define BATTERY_DISCHARGING_STATE   BIT(3)
+#define BATTERY_LOW_THRESHOLD       3400
+#define BATTERY_OFF_THRESHOLD       2750
+#endif
+/* clang-format off */
+
+/**************************************************************************************************/
+/* Global Function Prototypes                                                                     */
+/**************************************************************************************************/
+#if defined(CONFIG_BOARD_MG100)
+/**
+ * @brief Get the battery charging state
+ *
+ * @return uint8_t bitmask representing battery state
+ */
+uint8_t lcz_power_get_battery_state(void);
+#endif
 
 #ifdef __cplusplus
 }
