@@ -32,7 +32,7 @@ extern "C" {
 #define REBOOT_TYPE_BOOTLOADER 1
 
 /* ADC0 device */
-#define ADC0 DT_PROP(DT_NODELABEL(adc), label)
+#define ADC0 DEVICE_DT_GET(DT_INST(0, nordic_nrf_saadc))
 
 /* clang-format off */
 #define ADC_RESOLUTION               12

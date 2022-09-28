@@ -43,18 +43,18 @@ LOG_MODULE_REGISTER(MODULE_NAME, CONFIG_LCZ_POWER_LOG_LEVEL);
 
 /* clang-format off */
 #if defined(CONFIG_BOARD_MG100)
-#define MEASURE_ENABLE_PORT 	DT_PROP(DT_NODELABEL(gpio1), label)
+#define MEASURE_ENABLE_PORT 	DEVICE_DT_GET(DT_NODELABEL(gpio1))
 #define MEASURE_ENABLE_PIN 		10
-#define CHG_STATE_PORT          DT_PROP(DT_NODELABEL(gpio0), label)
+#define CHG_STATE_PORT          DEVICE_DT_GET(DT_NODELABEL(gpio0))
 #define CHG_STATE_PIN           30
-#define PWR_STATE_PORT          DT_PROP(DT_NODELABEL(gpio1), label)
+#define PWR_STATE_PORT          DEVICE_DT_GET(DT_NODELABEL(gpio1))
 #define PWR_STATE_PIN           4
 #define CHG_PIN_CHARGING        1
 #define CHG_PIN_NOT_CHARGING    0
 #define PWR_PIN_PWR_PRESENT     1
 #define PWR_PIN_PWR_NOT_PRESENT 0
 #elif defined(CONFIG_BOARD_PINNACLE_100_DVK)
-#define MEASURE_ENABLE_PORT 	DT_PROP(DT_NODELABEL(gpio0), label)
+#define MEASURE_ENABLE_PORT 	DEVICE_DT_GET(DT_NODELABEL(gpio0))
 #define MEASURE_ENABLE_PIN 		28
 #else
 #error "A measurement enable pin must be defined for this board."
@@ -297,13 +297,6 @@ static void lcz_power_run(FwkId_t *target)
 	bool finished = false;
 	float scaling;
 
-	/* Find the ADC device */
-	const struct device *adc_dev = device_get_binding(ADC0);
-	if (adc_dev == NULL) {
-		LOG_ERR("ADC device name %s not found", ADC0);
-		return;
-	}
-
 	(void)memset(&m_sample_buffer, 0, sizeof(m_sample_buffer));
 
 	const struct adc_sequence sequence = {
@@ -317,7 +310,7 @@ static void lcz_power_run(FwkId_t *target)
 	locking_take(LOCKING_ID_adc, K_FOREVER);
 
 	/* Enable power supply voltage to be monitored */
-	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN, PIN_ACTIVE);
+	ret = gpio_pin_set(MEASURE_ENABLE_PORT, MEASURE_ENABLE_PIN, PIN_ACTIVE);
 	if (ret) {
 		LOG_ERR("Error setting power GPIO");
 		return;
@@ -325,7 +318,7 @@ static void lcz_power_run(FwkId_t *target)
 
 	/* Measure voltage with 1/2 scaling which is suitable for higher
 	   voltage supplies */
-	lcz_power_measure_adc(adc_dev, ADC_GAIN_1_2, sequence);
+	lcz_power_measure_adc(ADC0, ADC_GAIN_1_2, sequence);
 	scaling = ADC_GAIN_FACTOR_TWO;
 
 	if (m_sample_buffer >= ADC_SATURATION) {
@@ -337,7 +330,7 @@ static void lcz_power_run(FwkId_t *target)
 	if (finished == false) {
 		/* Measure voltage with unity scaling which is suitable for
 		   medium voltage supplies */
-		lcz_power_measure_adc(adc_dev, ADC_GAIN_1, sequence);
+		lcz_power_measure_adc(ADC0, ADC_GAIN_1, sequence);
 		scaling = ADC_GAIN_FACTOR_ONE;
 
 		if (m_sample_buffer >= ADC_SATURATION) {
@@ -350,12 +343,12 @@ static void lcz_power_run(FwkId_t *target)
 	if (finished == false) {
 		/* Measure voltage with double scaling which is suitable for
 		   low voltage supplies, such as 2xAA batteries */
-		lcz_power_measure_adc(adc_dev, ADC_GAIN_2, sequence);
+		lcz_power_measure_adc(ADC0, ADC_GAIN_2, sequence);
 		scaling = ADC_GAIN_FACTOR_HALF;
 	}
 
 	/* Disable the voltage monitoring FET */
-	ret = gpio_pin_set(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
+	ret = gpio_pin_set(MEASURE_ENABLE_PORT, MEASURE_ENABLE_PIN,
 			   PIN_INACTIVE);
 
 	if (ret) {
@@ -453,7 +446,7 @@ static int lcz_power_init(const struct device *device)
 	/* Configure the VIN_ADC_EN pin as an output set low to disable the
 	 * power supply voltage measurement
 	 */
-	ret = gpio_pin_configure(device_get_binding(MEASURE_ENABLE_PORT), MEASURE_ENABLE_PIN,
+	ret = gpio_pin_configure(MEASURE_ENABLE_PORT, MEASURE_ENABLE_PIN,
 				 (GPIO_ACTIVE_HIGH | GPIO_OUTPUT_INACTIVE));
 	if (ret) {
 		LOG_ERR("Error configuring power GPIO");
