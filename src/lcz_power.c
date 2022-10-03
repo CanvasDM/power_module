@@ -95,10 +95,8 @@ K_MSGQ_DEFINE(lcz_power_queue, FWK_QUEUE_ENTRY_SIZE, CONFIG_LCZ_POWER_THREAD_QUE
 
 #if defined(CONFIG_BOARD_MG100)
 static struct k_work chg_state_work;
-static const struct device *battery_chg_state_dev;
 static struct gpio_callback battery_chg_state_cb;
 static struct gpio_callback battery_pwr_state_cb;
-static const struct device *battery_pwr_state_dev;
 #endif
 
 /**************************************************************************************************/
@@ -138,14 +136,14 @@ uint8_t lcz_power_get_battery_state(void)
 	int pin_state = 0;
 	uint8_t pwr_state = 0;
 
-	pin_state = gpio_pin_get(battery_pwr_state_dev, PWR_STATE_PIN);
+	pin_state = gpio_pin_get(PWR_STATE_PORT, PWR_STATE_PIN);
 	if (pin_state == PWR_PIN_PWR_PRESENT) {
 		pwr_state = BATTERY_EXT_POWER_STATE;
 	} else {
 		pwr_state = BATTERY_DISCHARGING_STATE;
 	}
 
-	pin_state = gpio_pin_get(battery_chg_state_dev, CHG_STATE_PIN);
+	pin_state = gpio_pin_get(CHG_STATE_PORT, CHG_STATE_PIN);
 	if (pin_state == CHG_PIN_CHARGING) {
 		pwr_state |= BATTERY_CHARGING_STATE;
 	} else {
@@ -348,8 +346,7 @@ static void lcz_power_run(FwkId_t *target)
 	}
 
 	/* Disable the voltage monitoring FET */
-	ret = gpio_pin_set(MEASURE_ENABLE_PORT, MEASURE_ENABLE_PIN,
-			   PIN_INACTIVE);
+	ret = gpio_pin_set(MEASURE_ENABLE_PORT, MEASURE_ENABLE_PIN, PIN_INACTIVE);
 
 	if (ret) {
 		LOG_ERR("Error setting power GPIO");
@@ -456,26 +453,24 @@ static int lcz_power_init(const struct device *device)
 #if defined(CONFIG_BOARD_MG100)
 	k_work_init(&chg_state_work, chg_state_handler);
 	/* configure the charging state gpio  */
-	battery_chg_state_dev = device_get_binding(CHG_STATE_PORT);
-	ret = gpio_pin_configure(battery_chg_state_dev, CHG_STATE_PIN,
+	ret = gpio_pin_configure(CHG_STATE_PORT, CHG_STATE_PIN,
 				 (GPIO_INPUT | GPIO_INT_EDGE_BOTH | GPIO_ACTIVE_LOW));
-	ret |= gpio_pin_interrupt_configure(battery_chg_state_dev, CHG_STATE_PIN,
+	ret |= gpio_pin_interrupt_configure(CHG_STATE_PORT, CHG_STATE_PIN,
 					    (GPIO_INPUT | GPIO_INT_EDGE_BOTH | GPIO_ACTIVE_LOW));
 	gpio_init_callback(&battery_chg_state_cb, battery_state_changed, BIT(CHG_STATE_PIN));
-	ret |= gpio_add_callback(battery_chg_state_dev, &battery_chg_state_cb);
+	ret |= gpio_add_callback(CHG_STATE_PORT, &battery_chg_state_cb);
 	if (ret) {
 		LOG_ERR("Error charge state input");
 		return -EIO;
 	}
 
 	/* configure the power state gpio */
-	battery_pwr_state_dev = device_get_binding(PWR_STATE_PORT);
-	ret = gpio_pin_configure(battery_pwr_state_dev, PWR_STATE_PIN,
+	ret = gpio_pin_configure(PWR_STATE_PORT, PWR_STATE_PIN,
 				 (GPIO_INPUT | GPIO_INT_EDGE_BOTH | GPIO_ACTIVE_LOW));
-	ret |= gpio_pin_interrupt_configure(battery_pwr_state_dev, PWR_STATE_PIN,
+	ret |= gpio_pin_interrupt_configure(PWR_STATE_PORT, PWR_STATE_PIN,
 					    (GPIO_INPUT | GPIO_INT_EDGE_BOTH | GPIO_ACTIVE_LOW));
 	gpio_init_callback(&battery_pwr_state_cb, battery_state_changed, BIT(PWR_STATE_PIN));
-	ret |= gpio_add_callback(battery_pwr_state_dev, &battery_pwr_state_cb);
+	ret |= gpio_add_callback(PWR_STATE_PORT, &battery_pwr_state_cb);
 	if (ret) {
 		LOG_ERR("Error power state input");
 		return -EIO;
