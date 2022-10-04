@@ -48,6 +48,8 @@ extern "C" {
 #define ADC_GAIN_FACTOR_HALF         0.5
 #define GPREGRET_BOOTLOADER_VALUE    0xb1
 
+#define PWR_SRC_OFF_THRESHOLD       3000
+
 #if defined(CONFIG_BOARD_MG100)
 /* values used to indicate the charger state */
 #define BATTERY_EXT_POWER_STATE     BIT(0)
@@ -55,7 +57,6 @@ extern "C" {
 #define BATTERY_NOT_CHARGING_STATE  BIT(2)
 #define BATTERY_DISCHARGING_STATE   BIT(3)
 #define BATTERY_LOW_THRESHOLD       3400
-#define BATTERY_OFF_THRESHOLD       2750
 #endif
 /* clang-format off */
 
