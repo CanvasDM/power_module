@@ -304,15 +304,15 @@ static void lcz_power_run(FwkId_t *target)
 		.resolution = ADC_RESOLUTION,
 	};
 
-	/* Prevent other ADC uses */
-	locking_take(LOCKING_ID_adc, K_FOREVER);
-
 	/* Enable power supply voltage to be monitored */
 	ret = gpio_pin_set(MEASURE_ENABLE_PORT, MEASURE_ENABLE_PIN, PIN_ACTIVE);
 	if (ret) {
 		LOG_ERR("Error setting power GPIO");
 		return;
 	}
+
+	/* Prevent other ADC uses */
+	locking_take(LOCKING_ID_adc, K_FOREVER);
 
 	/* Measure voltage with 1/2 scaling which is suitable for higher
 	   voltage supplies */
@@ -345,14 +345,13 @@ static void lcz_power_run(FwkId_t *target)
 		scaling = ADC_GAIN_FACTOR_HALF;
 	}
 
+	locking_give(LOCKING_ID_adc);
+
 	/* Disable the voltage monitoring FET */
 	ret = gpio_pin_set(MEASURE_ENABLE_PORT, MEASURE_ENABLE_PIN, PIN_INACTIVE);
-
 	if (ret) {
 		LOG_ERR("Error setting power GPIO");
 	}
-
-	locking_give(LOCKING_ID_adc);
 
 	lcz_power_measure_msg_t *fmsg =
 		(lcz_power_measure_msg_t *)BufferPool_Take(sizeof(lcz_power_measure_msg_t));
