@@ -107,6 +107,7 @@ static bool lcz_power_measure_adc(const struct device *adc_dev, enum adc_gain ga
 				  const struct adc_sequence sequence);
 static void lcz_power_run(FwkId_t *target);
 
+static DispatchResult_t lcz_power_measure_periodic(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
 static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
 static DispatchResult_t lcz_power_mode_set(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
 static DispatchResult_t lcz_power_interval_get(FwkMsgReceiver_t *receiver, FwkMsg_t *msg);
@@ -161,7 +162,17 @@ static DispatchResult_t lcz_power_measure_now(FwkMsgReceiver_t *receiver, FwkMsg
 {
 	lcz_power_measure_now_msg_t *fmsg = (lcz_power_measure_now_msg_t *)msg;
 
-	lcz_power_run((fmsg->target_sender == true ? &msg->header.txId : NULL));
+	lcz_power_run((fmsg->target_sender == true) ? &msg->header.txId : NULL);
+
+	return DISPATCH_OK;
+}
+
+static DispatchResult_t lcz_power_measure_periodic(FwkMsgReceiver_t *receiver, FwkMsg_t *msg)
+{
+	ARG_UNUSED(receiver);
+	ARG_UNUSED(msg);
+
+	lcz_power_run(NULL);
 
 	return DISPATCH_OK;
 }
@@ -235,19 +246,22 @@ static DispatchResult_t lcz_power_reboot(FwkMsgReceiver_t *receiver, FwkMsg_t *m
 
 static FwkMsgHandler_t *lcz_power_dispatcher(FwkMsgCode_t msg_code)
 {
-	if (msg_code == FMC_LCZ_SENSOR_MEASURE_NOW || msg_code == FMC_PERIODIC) {
+	switch (msg_code) {
+	case FMC_LCZ_SENSOR_MEASURE_NOW:
 		return lcz_power_measure_now;
-	} else if (msg_code == FMC_LCZ_SENSOR_CONFIG_SET) {
+	case FMC_PERIODIC:
+		return lcz_power_measure_periodic;
+	case FMC_LCZ_SENSOR_CONFIG_SET:
 		return lcz_power_mode_set;
-	} else if (msg_code == FMC_LCZ_SENSOR_CONFIG_GET) {
+	case FMC_LCZ_SENSOR_CONFIG_GET:
 		return lcz_power_interval_get;
-#ifdef CONFIG_REBOOT
-	} else if (msg_code == FMC_LCZ_POWER_REBOOT) {
+	case FMC_LCZ_POWER_REBOOT:
+#if defined(CONFIG_REBOOT)
 		return lcz_power_reboot;
 #endif
+	default:
+		return NULL;
 	}
-
-	return NULL;
 }
 
 static void lcz_power_thread(void *arg1, void *arg2, void *arg3)
@@ -354,7 +368,7 @@ static void lcz_power_run(FwkId_t *target)
 	}
 
 	lcz_power_measure_msg_t *fmsg =
-		(lcz_power_measure_msg_t *)BufferPool_Take(sizeof(lcz_power_measure_msg_t));
+		BufferPool_TryToTake(sizeof(lcz_power_measure_msg_t), "lcz power measure msg");
 
 	if (fmsg != NULL) {
 		fmsg->header.msgCode = FMC_LCZ_SENSOR_MEASURED;
@@ -395,8 +409,6 @@ static void lcz_power_run(FwkId_t *target)
 			BufferPool_Free(fmsg);
 			LOG_ERR("Failed to send voltage [%d]", ret);
 		}
-	} else {
-		LOG_WRN("Could not allocate lcz_power_measure_msg_t msg");
 	}
 }
 
