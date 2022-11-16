@@ -81,4 +81,9 @@ config LCZ_POWER_THREAD_STACK_SIZE
 	range 512 4096
 	default 512
 
+config LCZ_POWER_BATTERY_STATE_FILTER_MS
+	int "Milliseconds to wait before processing battery state change pins"
+	depends on BOARD_MG100
+	default 1000
+
 endif # LCZ_POWER

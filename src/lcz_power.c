@@ -94,7 +94,7 @@ K_MSGQ_DEFINE(lcz_power_queue, FWK_QUEUE_ENTRY_SIZE, CONFIG_LCZ_POWER_THREAD_QUE
 	      FWK_QUEUE_ALIGNMENT);
 
 #if defined(CONFIG_BOARD_MG100)
-static struct k_work chg_state_work;
+static struct k_work_delayable chg_state_work;
 static struct gpio_callback battery_chg_state_cb;
 static struct gpio_callback battery_pwr_state_cb;
 #endif
@@ -415,7 +415,12 @@ static void lcz_power_run(FwkId_t *target)
 #if defined(CONFIG_BOARD_MG100)
 static void battery_state_changed(const struct device *Dev, struct gpio_callback *Cb, uint32_t Pins)
 {
-	k_work_submit(&chg_state_work);
+	int r;
+
+	r = k_work_reschedule(&chg_state_work, K_MSEC(CONFIG_LCZ_POWER_BATTERY_STATE_FILTER_MS));
+	if (r < 0) {
+		LOG_WRN("Unable to schedule battery charge work: %d", r);
+	}
 }
 
 static void chg_state_handler(struct k_work *Item)
@@ -462,7 +467,7 @@ static int lcz_power_init(const struct device *device)
 	}
 
 #if defined(CONFIG_BOARD_MG100)
-	k_work_init(&chg_state_work, chg_state_handler);
+	k_work_init_delayable(&chg_state_work, chg_state_handler);
 	/* configure the charging state gpio  */
 	ret = gpio_pin_configure(CHG_STATE_PORT, CHG_STATE_PIN,
 				 (GPIO_INPUT | GPIO_INT_EDGE_BOTH | GPIO_ACTIVE_LOW));
@@ -506,6 +511,10 @@ static int lcz_power_init(const struct device *device)
 	k_thread_name_set(lcz_power_task.pTid, STRINGIFY(MODULE_NAME));
 
 	LOG_DBG("Initialized!");
+
+#if defined(CONFIG_BOARD_MG100)
+	battery_state_changed(NULL, NULL, 0);
+#endif
 
 	return 0;
 }
